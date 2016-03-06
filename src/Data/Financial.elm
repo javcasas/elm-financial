@@ -1,4 +1,19 @@
-module Data.Financial (Financial, significativeDigits, tests) where
+module Data.Financial
+    ( Financial
+    , fromInt
+    , withDecimalsFromInt
+    , genPercentage
+    , significativeDigits
+    , max_significative_digits
+    , add
+    , sub
+    , mul
+    , div
+    , opposite
+    , toString
+    , toAccountingString
+    , roundToDecimals
+    , tests) where
 
 import String
 import Html
@@ -26,6 +41,7 @@ significativeDigits v =
     if i >= 10
     then 1 + significativeDigits (i // 10)
     else 1
+
 
 max_significative_digits : Int
 max_significative_digits =
@@ -64,6 +80,7 @@ toCommonDecimals (f1, f2) =
             else (addDecimals (d2 - d1) f1, f2)
         _ -> (f1, f2)
 
+
 add : Financial -> Financial -> Financial
 add f1 f2 =
     let (f3, f4) = toCommonDecimals (f1, f2) in
@@ -72,8 +89,10 @@ add f1 f2 =
             Normal (m1 + m2) d1
         _ -> Invalid
 
+
 sub : Financial -> Financial -> Financial
 sub f1 f2 = f1 `add` (opposite f2)
+
 
 mul : Financial -> Financial -> Financial
 mul f1 f2 =
@@ -84,8 +103,10 @@ mul f1 f2 =
             else Normal (m1 * m2) (d1 + d2)
         _ -> Invalid
 
+
 genPercentage : Int -> Financial
 genPercentage p = Normal p 2
+
 
 opposite : Financial -> Financial
 opposite f =
@@ -95,26 +116,39 @@ opposite f =
         _ -> Invalid
 
     
-toString : Financial -> String
-toString f = 
-    case f of 
-        Invalid -> "Invalid"
-        Normal m d ->
-            let base = Basics.toString m in
-            String.dropRight d base ++ "." ++String.right d base
-
-
-toAccountingString : Financial -> String
-toAccountingString f = 
-    case f of 
+toBaseString : Financial -> String
+toBaseString f =
+    case f of
         Invalid -> "Invalid"
         Normal m d ->
             let base = Basics.toString (abs m) in
-            let res = String.dropRight d base ++ "." ++ String.right d base in
+            let base_with_lead_zeros =
+                if String.length base <= d
+                then (String.repeat (1 + (d - String.length base)) "0") ++ base
+                else base
+            in
+            String.dropRight d base_with_lead_zeros ++ "." ++ String.right d base_with_lead_zeros
+
+
+toString : Financial -> String
+toString f =
+    case f of
+        Invalid -> "Invalid"
+        Normal m d ->
             if m < 0
-            then "(" ++ res ++ ")"
-            else res
-            
+            then "-" ++ (toBaseString f)
+            else toBaseString f
+
+
+toAccountingString : Financial -> String
+toAccountingString f =
+    case f of
+        Invalid -> "Invalid"
+        Normal m d ->
+            if m < 0
+            then "(" ++ toBaseString f ++ ")"
+            else toBaseString f
+
 
 roundToDecimals : Int -> Financial -> Financial
 roundToDecimals new_decimals f =
@@ -136,6 +170,36 @@ roundToDecimals new_decimals f =
             else Normal divide new_decimals
 
 
+prepare_num_for_div : Financial -> Financial
+prepare_num_for_div f =
+    let f2 = addDecimals 1 f in
+    case f2 of
+        Invalid -> f
+        _ -> prepare_num_for_div f2
+
+
+prepare_den_for_div : Financial -> Financial
+prepare_den_for_div f =
+    case f of
+        Invalid -> f
+        Normal m d ->
+            if m == 0
+            then f
+            else if m `rem` 10 == 0
+            then prepare_den_for_div (Normal (m // 10) (d - 1))
+            else f
+
+
+div : Financial -> Financial -> Financial
+div f1 f2 =
+    let f1p = prepare_num_for_div f1 in
+    let f2p = prepare_den_for_div f2 in
+    case (f1p, f2p) of
+        (Normal m1 d1, Normal m2 d2) ->
+            Normal (m1 // m2) (d1 - d2)
+        _ -> Invalid
+
+
 tests : List (String, Bool)
 tests = [ ("Significative Digits 1", significativeDigits 100 == 3)
         , ("Significative Digits 2", significativeDigits -100 == 3)
@@ -143,6 +207,9 @@ tests = [ ("Significative Digits 1", significativeDigits 100 == 3)
         , ("Max Significative Digits for this implementation: " ++ Basics.toString max_significative_digits, max_significative_digits > 10)
         , ("toString 1", toString (Normal -100 2) == "-1.00")
         , ("toString 2", toString (Normal 100 2) == "1.00")
+        , ("toString 3", toString (Normal 1 2) == "0.01")
+        , ("toString 4", toString (Normal 10 2) == "0.10")
+        , ("toString 5", toString (Normal -100 2) == "-1.00")
         , ("toAccountingString 1", toAccountingString (Normal -100 2) == "(1.00)")
         , ("toAccountingString 2", toAccountingString (Normal 100 2) == "1.00")
         , ("addDecimals 1", addDecimals 2 (Normal 1 0) == Normal 100 2)
@@ -160,6 +227,8 @@ tests = [ ("Significative Digits 1", significativeDigits 100 == 3)
                                  == Normal 1 0)
         , ("mul 2", Normal 10000000000 0 `mul` Normal 10000000000 0
                                  == Invalid)
+        , ("div 1 " ++ Basics.toString (120000000 // 18), roundToDecimals 4 (Normal 1200 0 `div` Normal 1800 0)
+                                 == Normal 6667 4)
         , ("equals 1", Normal 1 0 == Normal 1 0)
         , ("equals 2", Normal 1 0 /= Normal 10 1)
         , ("genPercentage 1", genPercentage 12 == Normal 12 2)
